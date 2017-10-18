@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <stdbool.h>
 
 #include <sys/types.h>// für Linux
 #include <sys/stat.h> // für Linux
@@ -25,14 +27,15 @@
 /*
  * 
  */
+int curAnzahlThreads;
+pthread_mutex_t mutex;
 
-// Thread Create
 
-void hilfetextAusgeben(){
+static void hilfetextAusgeben(){
     printf("usage: File-Creator [-c <MaxAnzahlThreads>] <NAMENDATEI>");
 }
 
-static FILE* create(char* name) {
+static void create(char* name) {
     FILE * pFile = NULL;
     if (name != NULL) {
         pFile = fopen(name, "w");
@@ -41,6 +44,9 @@ static FILE* create(char* name) {
             pFile = NULL;
         }
     }
+    pthread_mutex_lock (&mutex);
+    curAnzahlThreads--;
+    pthread_mutex_unlock (&mutex);
     exit(3);
 }
 
@@ -48,7 +54,7 @@ int main(int argc, char* argv[]) {
 
     char * pFilename = NULL;
     int MAXanzahlThreads = 3;
-    int curAnzahlThreads = 0;
+    curAnzahlThreads = 0;
 
     int c;
 
@@ -71,13 +77,43 @@ int main(int argc, char* argv[]) {
 
     pFilename = argv[argc-1];
     
+    // Datei öffnen
     FILE pFile = NULL;
     if(pFile = fopen() == NULL){
         printf("Datei nicht lesbar oder nicht übergeben.");
         return EXIT_FAILURE;
     }
-
-    pthread_t [] = MAXanzahlThreads;
+    
+    // Threads bauen
+    int MAXdateiNamenLaenge = 15;
+    char* tempDateiName;
+    int errorcounter = 0;
+    do{
+        fgets(tempDateiName, MAXdateiNamenLaenge, pFile);
+        int tempCurAnzahlThreads;
+        if(tempDateiName != NULL){
+            bool threadIstGestartet = false;
+            while(!threadIstGestartet){
+                pthread_mutex_lock (&mutex);
+                tempCurAnzahlThreads = curAnzahlThreads;
+                pthread_mutex_unlock (&mutex);
+                if(tempCurAnzahlThreads < MAXanzahlThreads){
+                    pthread_t pTh = NULL;
+                    if(pthread_create(pTh, NULL, create(tempDateiName), NULL)!= 0){
+                        errorcounter++;
+                    } else {
+                        threadIstGestartet = true;
+                        pthread_mutex_lock (&mutex);
+                        curAnzahlThreads++;
+                        pthread_mutex_unlock (&mutex);
+                    }
+                }
+            }
+            
+            
+        }        
+        
+    } while(tempDateiName != NULL);
     
     
     close(pFile);
