@@ -17,8 +17,8 @@
 #include <sys/types.h>// für Linux
 #include <sys/stat.h> // für Linux
 
-#include <io.h>       // für Windows
-#include <sys\stat.h> // für Windows
+//#include <io.h>       // für Windows
+//#include <sys\stat.h> // für Windows
 
 #include <fcntl.h>
 
