@@ -1,9 +1,3 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
-
 /* 
  * File:   File-Creator.h
  * Author: MaWi
@@ -13,23 +7,15 @@
 
 #ifndef FILE_CREATOR_H
 #define FILE_CREATOR_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
     
 // Globale Variablen
-#define static int FEHLER = -1;
-#define static int KEIN_FEHLER = 0;
+#define FEHLER = -1;
+#define KEIN_FEHLER = 0;
+#define BUFFER_NAMEN_GROESSE = 10;
 
 // Funktionen
 
-
-
-
-#ifdef __cplusplus
-}
-#endif
+int main(int argc, char* argv[]);
 
 #endif /* FILE_CREATOR_H */
 
