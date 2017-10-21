@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <string.h>
+#include <getopt.h>
 
 #include <sys/types.h>// für Linux
 #include <sys/stat.h> // für Linux
@@ -23,69 +24,144 @@
 
 #include <fcntl.h>
 
-#include "File-Creator.h"
+//#include "File-Creator.h"
+
+// Globale Variablen
+#define FEHLER -1;
+#define KEIN_FEHLER 0;
+#define BUFFER_NAMEN_GROESSE 10;
+
 /*
- * 
+ * Globale Variablen 
  */
+bool debugModeOn = false;
 int curAnzahlThreads = 0;
+int MAXanzahlThreads = 3;
+// Dateibuffer variablen
 pthread_mutex_t mutex_AnzahlThreads;
 int MAX_BUFFER_GROESSE = 20;
 int MAXdateiNamenLaenge = 15;
-char ** ppDateiNamenBuffer;
+char * * ppDateiNamenBuffer;
 int dateinamenBufferFuellZeiger;
 int dateinamenBufferEntnahmeZeiger;
 pthread_mutex_t mutex_DateiNamen;
 char * pNamensDateiName;
+// Dateinamen variablen
+int curAnzahlDateinamen = 0;
+bool alleDateienEingelesen = false;
+pthread_mutex_t mutex_AnzahlDateinamen;
+// Thread beendet variablen
+int threadsBeendet = 0;
+pthread_mutex_t mutex_ThreadsBeendet;
+
 
 static void hilfetextAusgeben(){
-    printf("usage: File-Creator [-c <MaxAnzahlThreads>] <NAMENDATEI>");
+    fprintf(stderr,"usage: File-Creator [-c <MaxAnzahlThreads>] <NAMENDATEI>\n");
 }
 
-static void namenEinlesen(){
+static void * namenEinlesen(){
+    if(debugModeOn){
+        fprintf(stderr,"EinleseThread gestartet\n");
+    }
+    
     FILE * pEinleseDatei = fopen(pNamensDateiName,"r");
-    char * tempDateiname;
-    char* pTempDateiName = malloc(sizeof(char)*15);
-    fgets(pTempDateiName, MAXdateiNamenLaenge, pEinleseDatei);
-    while(pTempDateiName != NULL){
+    //char * tempDateiname;
+    char * pTempDateiName = malloc(sizeof(char)*15);
+    char * endLineChecker = fgets(pTempDateiName, MAXdateiNamenLaenge, pEinleseDatei);
+    while(endLineChecker != NULL){
+        
+        if(debugModeOn){
+            fprintf(stderr,"EinleseThread while Anfang----------\n%s\n", pTempDateiName
+            );
+        }
+        
+        // Endline wegnehmen
+        char * pEndLine = strchr(pTempDateiName, '\n');
+        if(pEndLine != NULL){
+            *pEndLine = '\0';
+        }   
+        
+        if(debugModeOn){
+            fprintf(stderr,"%s\n", pTempDateiName );
+        }
+        
         bool dateinameIstGeschrieben = false;
         while(!dateinameIstGeschrieben){
-            pthread_mutex_lock(mutex_DateiNamen);
-            int tempDateinamenBufferFuellZeiger;
-            int tempDateinamenBufferEntnahmeZeiger;
-            pthread_mutex_unlock(mutex_DateiNamen);
+            
+            pthread_mutex_lock(&mutex_DateiNamen);
+            int tempDateinamenBufferFuellZeiger = dateinamenBufferFuellZeiger;
+            int tempDateinamenBufferEntnahmeZeiger = dateinamenBufferEntnahmeZeiger;
+            pthread_mutex_unlock(&mutex_DateiNamen);
             int space = tempDateinamenBufferFuellZeiger - tempDateinamenBufferEntnahmeZeiger;
             if((space >= 0) && (space < MAX_BUFFER_GROESSE)){
-                char * pEndLine = strchr(pTempDateiName, '\n');
-                if(pEndLine != NULL){
-                    *pEndLine = '\0';
-                }            
-                int bufferWritePosition = tempDateinamenBufferFuellZeiger%MAX_BUFFER_GROESSE;
-                pthread_mutex_lock(mutex_DateiNamen);
+                         
+                int bufferWritePosition = (tempDateinamenBufferFuellZeiger % MAX_BUFFER_GROESSE);
+                // Globale Buffervariable ändern und in den Buffer schreiben.
+                pthread_mutex_lock(&mutex_DateiNamen);
                 ppDateiNamenBuffer[bufferWritePosition] = pTempDateiName;
-                tempDateinamenBufferFuellZeiger++;
-                pthread_mutex_unlock(mutex_DateiNamen);
+                dateinamenBufferFuellZeiger++;
+                if(debugModeOn){
+                    fprintf(stderr,"bufferWriterPosition: %d %s\n", bufferWritePosition, ppDateiNamenBuffer[bufferWritePosition]);
+                }
+                pthread_mutex_unlock(&mutex_DateiNamen);
+                
+                // Globalen Dateinamencounter inkrmentieren.
+                pthread_mutex_lock(&mutex_AnzahlDateinamen);
+                curAnzahlDateinamen++;
+                pthread_mutex_unlock(&mutex_AnzahlDateinamen);
+                
                 dateinameIstGeschrieben = true;
             }    
         }
-        fgets(pTempDateiName, MAXdateiNamenLaenge, pEinleseDatei);
+        
+        if(debugModeOn){
+            fprintf(stderr,"1 Name eingelesen\n");
+        }
+        
+        endLineChecker = fgets(pTempDateiName, MAXdateiNamenLaenge, pEinleseDatei);
     }
-    exit(3);
+    
+    if(debugModeOn){
+        fprintf(stderr,"Einlese Thread wird beendet\n");
+    }
+    
+    pthread_mutex_lock(&mutex_AnzahlDateinamen);
+    alleDateienEingelesen = true;
+    pthread_mutex_unlock(&mutex_AnzahlDateinamen);
+    pthread_exit(NULL); //exit(3);
 }
 
 static void * create() {
+    
+    if(debugModeOn){
+        fprintf(stderr,"Create Thread wurde gestartet\n");
+    }
+    
     bool nameGeholt = false;
-    char * dateiname;
+    char * dateiname = malloc(sizeof(char)*15);
     while(!nameGeholt){
-        pthread_mutex_lock(mutex_DateiNamen);
+        if(debugModeOn){
+            fprintf(stderr,"Schleifenanfang im Thread\n");
+        }
+        pthread_mutex_lock(&mutex_DateiNamen);
         int tempDateinamenBufferFuellZeiger = dateinamenBufferFuellZeiger;
         int tempDateinamenBufferEntnahmeZeiger = dateinamenBufferEntnahmeZeiger;
         int tempSize = tempDateinamenBufferFuellZeiger-tempDateinamenBufferEntnahmeZeiger;
-        if(tempSize>0){
-            dateiname = ppDateiNamenBuffer[tempDateinamenBufferEntnahmeZeiger%MAX_BUFFER_GROESSE];
+        
+        if(tempSize > 0){
+            dateiname = ppDateiNamenBuffer[tempDateinamenBufferEntnahmeZeiger % MAX_BUFFER_GROESSE];
+            if(debugModeOn){
+                fprintf(stderr,"DateinamenBufferPos: %d\n%s\n", tempDateinamenBufferEntnahmeZeiger % MAX_BUFFER_GROESSE, ppDateiNamenBuffer[tempDateinamenBufferEntnahmeZeiger % MAX_BUFFER_GROESSE]);
+            }
             dateinamenBufferEntnahmeZeiger++;
+            nameGeholt = true;
         }
-        pthread_mutex_unlock(mutex_DateiNamen);
+        pthread_mutex_unlock(&mutex_DateiNamen);
     }    
+    
+    if(debugModeOn){
+        fprintf(stderr,"Create Thread hat Namen geholt: %s\n", dateiname);
+    }
     
     FILE * pFile;
     if (dateiname != NULL) {
@@ -93,114 +169,184 @@ static void * create() {
         if (pFile != NULL) {
             fclose(pFile);
             pFile = NULL;
+            
+            if(debugModeOn){
+                fprintf(stderr,"Datei erstellt\n");
+            }
         }
     }
     
     pFile = NULL;
+    pthread_mutex_lock (&mutex_ThreadsBeendet);
+    threadsBeendet++;
+    pthread_mutex_unlock (&mutex_ThreadsBeendet);
     pthread_mutex_lock (&mutex_AnzahlThreads);
     curAnzahlThreads--;
     pthread_mutex_unlock (&mutex_AnzahlThreads);
-    exit(3);
+    
+    if(debugModeOn){
+        fprintf(stderr,"Create Thread wird beendet!\n");
+    }
+    
+    pthread_exit(NULL); //exit(3);
 }
-
+/*
+int getPlatzImArray(pthread_t* pThreadArray[]){
+    for(int i = 0; i < MAXanzahlThreads; i++){
+        if(pThreadArray[i] == NULL){
+            return i;
+        }
+    }
+    return FEHLER;
+}
+*/
 int main(int argc, char* argv[]) {
-    pthread_mutex_init (&mutex_DateiNamen, NULL);
-    pthread_mutex_init (&mutex_AnzahlThreads, NULL);
-    int MAXanzahlThreads = 3;
+    fprintf(stderr,"Programm läuft...\n");
+    pthread_mutex_init(&mutex_DateiNamen, NULL);
+    pthread_mutex_init(&mutex_AnzahlThreads, NULL);
+    pthread_mutex_init(&mutex_AnzahlDateinamen, NULL);
     curAnzahlThreads = 0;
     int c;
     
 
-    while ((c = getopt(argc, argv, "C:") != -1)) {
+    while ((c = getopt(argc, argv, "vC:")) != -1) {
+        fprintf(stderr,"while Durchlauf\n");
         switch (c) {
             case 'C':
                 MAXanzahlThreads = atoi(optarg);
+                fprintf(stderr,"Max Anzahl Threads gesetzt: %d\n", MAXanzahlThreads);
                 break;
-            case '?':
+            case 'v':
+                fprintf(stderr,"Debug Mode!\n");
+                debugModeOn = true;
+                break;
+            default :
                 hilfetextAusgeben();
-                return EXIT_FAILURE;
-                break;
+                return EXIT_SUCCESS;
+                break;    
         }
     }
+    fprintf(stderr,"while verlassen\n");
     
     if(MAXanzahlThreads <= 0){
-        printf("!!! Für -C <Ganzzahl>0> !!!");
+        fprintf(stderr,"!!! Für -C <Ganzzahl>0> !!!\n");
         return EXIT_FAILURE;
     }
-
+    
     pNamensDateiName = argv[argc-1];
+    
+    if(debugModeOn){
+        fprintf(stderr,"Dateiname: %s\n", pNamensDateiName);
+        fprintf(stderr,"MAXanzahlThreads: %d\n", MAXanzahlThreads);
+        fprintf(stderr,"MAX_BUFFER_GROESSE: %d\n", MAX_BUFFER_GROESSE);
+    }
     
     // Testen, ob Datei lesbar.
     FILE * pFile = fopen(pNamensDateiName,"r");
     if(pFile == NULL){
-        printf("Datei nicht lesbar oder nicht übergeben.");
+        fprintf(stderr,"Datei nicht lesbar oder nicht übergeben.\n");
         return EXIT_FAILURE;
     }
+    
+    if(debugModeOn){
+        fprintf(stderr,"Datei lesbar\n");
+    }
+    
     fclose(pFile);
     pFile = NULL;
     
     // Globale Variablen initialisieren
-    pthread_mutex_lock(mutex_DateiNamen);
+    pthread_mutex_lock(&mutex_DateiNamen);
     dateinamenBufferFuellZeiger = 0;
     dateinamenBufferEntnahmeZeiger = 0;
-    malloc(ppDateiNamenBuffer, sizeof(char)*MAXdateiNamenLaenge*(MAX_BUFFER_GROESSE+1));
-    pthread_mutex_unlock(mutex_DateiNamen);
+    ppDateiNamenBuffer = malloc(sizeof(char*)*(MAX_BUFFER_GROESSE+1));
+    pthread_mutex_unlock(&mutex_DateiNamen);
     
-    // Einlesethread starten.
+    // Einlesethread starten
     pthread_t pEinleseThread;
-    if(pthread_create(&pEinleseThread, NULL, create, NULL) != 0 ){
-        printf("EinleseThread nicht gestartet!");
+    if(pthread_create(&pEinleseThread, NULL, namenEinlesen, NULL) != 0 ){
+        fprintf(stderr,"EinleseThread nicht gestartet!");
         return EXIT_FAILURE;
     }
     
     // Threads starten und Listen
-    pthread_t* pThreadArray[];
-    int threadCounter = 0;
+    bool alleThreadsGestartet = false;
+    //pthread_t* pThreadArray[MAXanzahlThreads];
+    //malloc(pThreadArray, sizeof(pthread_t)*(MAXanzahlThreads));
+    int threadStartedCounter = 0;
     
-    while()
+    do {
+//         if(debugModeOn){
+//             fprintf(stderr,"Creater Threads Startschleife anfang\n");
+//         }
+        // Globalen Dateinamencounter abfragen
+        pthread_mutex_lock(&mutex_AnzahlDateinamen);
+        int tempAnzahlDateinamen = curAnzahlDateinamen;
+        pthread_mutex_unlock(&mutex_AnzahlDateinamen);
+        while(tempAnzahlDateinamen > threadStartedCounter ){
+//             if(debugModeOn){
+//                 fprintf(stderr,"Creater Threads innere Schleife anfang\n");
+//             }
+            //int arrayPlatz = getPlatzImArray(pThreadArray);
+            //if(arrayPlatz < 0){
+            //    fprintf(stderr,"Fehler im Thread-Array!");
+            //    return EXIT_FAILURE;
+            //}
+            pthread_t myThread = 0;
+            if(pthread_create(&myThread, NULL, create, NULL) == 0){
+                //myThreadArray[arrayPlatz] = thread;
+                threadStartedCounter++;
+                fprintf(stderr,"Thread %d wurde gestartet.\n", threadStartedCounter);
+            } else {
+                fprintf(stderr,"Thread %d konnte nicht gestartet werden.\n", threadStartedCounter);
+            }
+            // Globalen Dateinamencounter abfragen.    
+            pthread_mutex_lock(&mutex_AnzahlDateinamen);
+            tempAnzahlDateinamen = curAnzahlDateinamen;
+            pthread_mutex_unlock(&mutex_AnzahlDateinamen);
+//             if(debugModeOn){
+//                 fprintf(stderr,"Creater Threads innere Schleife Ende\n");
+//             }
+        }
+        pthread_mutex_lock(&mutex_AnzahlDateinamen);
+        bool tempAlleDateienEingelesen = alleDateienEingelesen;
+        pthread_mutex_unlock(&mutex_AnzahlDateinamen);
+        if(tempAlleDateienEingelesen && (tempAnzahlDateinamen > 0) && (tempAnzahlDateinamen == threadStartedCounter)){
+            alleThreadsGestartet = true;
+        }
+    } while(!alleThreadsGestartet);
+
+    if(debugModeOn){
+        fprintf(stderr,"Creater Threads Startschleife beendet\n");
+    }
     
-    
-    
-    
-    /*
+    // warten auf alle Threads
+    pthread_mutex_lock (&mutex_ThreadsBeendet);
+        int tempThreadsBeendet = threadsBeendet;
+    pthread_mutex_unlock (&mutex_ThreadsBeendet);
     do{
-        fgets(pTempDateiName, MAXdateiNamenLaenge, pFile);
-        //TODO \n entfernen???
-        int tempCurAnzahlThreads;
-        if(pTempDateiName != NULL){
-            bool threadIstGestartet = false;
-            while(!threadIstGestartet){
-                pthread_mutex_lock (&mutex_AnzahlThreads);
-                tempCurAnzahlThreads = curAnzahlThreads;
-                pthread_mutex_unlock (&mutex_AnzahlThreads);
-                if(tempCurAnzahlThreads < MAXanzahlThreads){
-                    pthread_t pTh;
-                    if( pthread_create(&pTh, NULL, create, NULL) != 0){
-                        errorcounter++;
-                    } else {
-                        threadIstGestartet = true;
-                        pthread_mutex_lock (&mutex_AnzahlThreads);
-                        curAnzahlThreads++;
-                        pthread_mutex_unlock (&mutex_AnzahlThreads);
-                    }
-                }
-            } 
-        } 
-    } while(pTempDateiName != NULL);
-    */
+        pthread_mutex_lock (&mutex_ThreadsBeendet);
+        tempThreadsBeendet = threadsBeendet;
+        pthread_mutex_unlock (&mutex_ThreadsBeendet);
+//         if(debugModeOn){
+//             fprintf(stderr,"threadsBeendet < threadStartedCounter:\n       %d       <       %d\n", tempThreadsBeendet, threadStartedCounter);
+//         }
+        
+    } while(tempThreadsBeendet < threadStartedCounter);
     
+    if(debugModeOn){
+        fprintf(stderr,"Alle Threades beendet\n");
+    }
     
-    
-    
-    
-    
-    // TODO warten auf Threads!!!
-    
+    // Aufräumen
+    //free(pThreadArray);
+    //pThreadArray = NULL;
     free(ppDateiNamenBuffer);
-    close(pFile);
-    FILE * pFile = NULL;
-
-
+    ppDateiNamenBuffer = NULL;
+ 
+    if(debugModeOn){
+        fprintf(stderr,"Programm Ende\n");
+    }
     return (EXIT_SUCCESS);
 }
 
